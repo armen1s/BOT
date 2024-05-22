@@ -3,24 +3,28 @@ import math
 import ccxt
 import pandas as pd
 import logging
+from config_api import API_KEY, API_SECRET
+from config_trading import SYMBOL, LEVERAGE, POSITION_SIZE, FRAME, ATR_PERIOD, ATR_MULTIPLIER
+from strategy import Strategy
+from sl import SL
 
 class TradingBot:
     def __init__(self):
         # Получение API ключа и секрета из конфигурации
-        self.api_key = config_api.API_KEY
-        self.api_secret = config_api.API_SECRET
+        self.api_key = API_KEY
+        self.api_secret = API_SECRET
         # Установка символа для торговли (например, BTC/USDT)
-        self.symbol = config_trading.SYMBOL
+        self.symbol = SYMBOL
         # Установка ливмента (например, 50x)
-        self.leverage = config_trading.LEVERAGE
+        self.leverage = LEVERAGE
         # Установка размера позиции (например, 10 USDT)
-        self.position_size = config_trading.POSITION_SIZE
+        self.position_size = POSITION_SIZE
         # Установка временного интервала для получения данных с рынка (например, '1h')
-        self.frame = config_trading.FRAME
+        self.frame = FRAME
         # Установка периода для вычисления ATR (например, 14)
-        self.atr_period = config_trading.ATR_PERIOD
+        self.atr_period = ATR_PERIOD
         # Установка коэффициента умножения ATR (например, 3)
-        self.atr_multiplier = config_trading.ATR_MULTIPLIER
+        self.atr_multiplier = ATR_MULTIPLIER
         # Инициализация логгера
         self.logger = logging.getLogger(__name__)
         # Установка уровня логирования на WARNING для основного логирования
@@ -30,135 +34,68 @@ class TradingBot:
             'apiKey': self.api_key,
             'secret': self.api_secret,
             'enableRateLimit': True,
-            'rateLimit': 3000,
-            'options': {'adjustForTimeDifference': True}
+            'timeout': 10000,
+            'rateLimit': 500,
+            'enableLastResponseHeaders': True,
+            'handleErrors': True,
+            'handleHttpErrors': True,
+            'keepAlive': False,
+            'retry': 0,
+            'verbose': False,
+            'urls': {
+                'api': {
+                    'spot': 'https://api.bybit.com',
+                    'linear': 'https://api.bybit.com',
+                    'linear_usdt': 'https://api.bybit.com',
+                    'api_linear': 'https://api.bybit.com',
+                    'api_linear_usdt': 'https://api.bybit.com',
+                },
+                'www': 'https://www.bybit.com',
+            },
         })
+        # Установка уровня ливмента
+        self.exchange.set_leverage(self.symbol, self.leverage)
+        # Установка стратегии для торговли
+        self.strategy = Strategy(self.exchange, self.symbol, self.leverage, self.position_size, self.frame, self.atr_period, self.atr_multiplier)
+        # Установка стоп-лосса для торговли
+        self.sl = SL(is_dinamic=True, coef=0.25)
 
-        # Добавление консольного обработчика для логирования с уровнем INFO и форматированием
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(formatter)
-        self.logger.addHandler(console_handler)
+    def get_ticker(self):
+        # Получение текущей цены символа
+        ticker = self.exchange.fetch_ticker(self.symbol)
+        return ticker
 
-    def connect_to_api(self):
-        # Загрузка доступных рынков
-        self.exchange.load_markets()
-        # Информационное сообщение о подключении к API биржи
-        self.logger.info("Подключено к API биржи ByBit")
+    def get_order_book(self):
+        # Получение книги заявок для символа
+        order_book = self.exchange.fetch_order_book(self.symbol)
+        return order_book
 
-    def get_account_info(self):
-        try:
-            # Получение информации о счете
-            account_info = self.exchange.fetch_balance()
-            # Информационное сообщение об информации о счете
-            self.logger.info("Информация о счете: {}".format(account_info))
-            # Возвращение информации о счете
-            return account_info
-        except Exception as e:
-            # Ошибочное сообщение об ошибке при получении информации о счете
-            self.logger.error("Ошибка при получении информации о счете: {}".format(str(e)))
-            # Возвращение None
-            return None
+    def get_trades(self):
+        # Получение сделок для символа
+        trades = self.exchange.fetch_trades(self.symbol)
+        return trades
 
-    def get_market_data(self):
-        try:
-            # Получение данных с рынка
-            ohlcv = self.exchange.fetch_ohlcv(self.symbol, self.frame)
-            # Информационное сообщение о данных с рынка
-            self.logger.info("Данные с рынка: {}".format(ohlcv))
-            # Преобразование данных в DataFrame
-            return pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        except Exception as e:
-            # Ошибочное сообщение об ошибке при получении данных с рынка
-            self.logger.error("Ошибкапри получении данных с рынка: {}".format(str(e)))
-            # Возвращение None
-            return None
+    def get_kline(self, timeframe: str):
+        # Получение свечей для символа с заданным временным интервалом
+        kline = self.exchange.fetch_ohlcv(self.symbol, timeframe)
+        return kline
 
-    def place_order(self, order_type, price, quantity):
-        try:
-            # Размещение заявки
-            order = self.exchange.create_order(self.symbol, order_type, quantity, price)
-            # Информационное сообщение о размещенной заявке
-            self.logger.info("Заявка размещена: {}".format(order))
-            # Возвращение заявки
-            return order
-        except Exception as e:
-            # Ошибочное сообщение об ошибке при размещении заявки
-            self.logger.error("Ошибка при размещении заявки: {}".format(str(e)))
-            # Возвращение None
-            return None
+    def trade(self):
+        # Определение типа сделки
+        trade_type = self.strategy.get_trade_type()
+        if trade_type is not None:
+            # Определение размера сделки
+            position_size = self.strategy.get_position_size()
+            # Выставление стоп-лосса
+            stop_loss = self.sl.get_sl(self.strategy.get_ohlcv(), trade_type)
+            # Выставление сделки
+            self.exchange.create_order(self.symbol, 'limit', trade_type, position_size, stop_loss_price=stop_loss)
+            self.logger.warning('Сделка выполнена: type=%s, size=%s, stop_loss=%s', trade_type, position_size, stop_loss)
 
-    def calculate_stop_loss(self, data):
-        try:
-            # Вычисление ATR
-            atr = data['atr'].rolling(window=self.atr_period).mean()
-            # Вычисление стоп-лосса
-            stop_loss = data['close'] - atr * self.atr_multiplier
-            # Информационное сообщение о вычисленном стоп-лоссе
-            self.logger.info("Стоп-лосс вычислен: {}".format(stop_loss))
-            # Возвращение стоп-лосса
-            return stop_loss
-        except Exception as e:
-            # Ошибочное сообщение об ошибке при вычислении стоп-лосса
-            self.logger.error("Ошибка при вычислении стоп-лосса: {}".format(str(e)))
-            # Возвращение None
-            return None
-
-    def start_trading(self):
-        # Получение информации о счете
-        account_info = self.get_account_info()
-        if account_info is None:
-            # Ошибочное сообщение об ошибке при получении информации о счете
-            self.logger.error("Ошибка при получении информации о счете")
-            # Возвращение
-            return
-
-        # Получение данных с рынка
-        market_data = self.get_market_data()
-        if market_data is None:
-            # Ошибочное сообщение об ошибке при получении данных с рынка
-            self.logger.error("Ошибка при получении данных с рынка")
-            # Возвращение
-            return
-
+    def run(self):
+        # Выполнение сделок бесконечно
         while True:
-            # Получение текущей цены
-            current_price = market_data['close'][-1]
-            # Вычисление стоп-лосса
-            stop_loss = self.calculate_stop_loss(market_data)
-            if stop_loss is None:
-                # Ошибочное сообщение об ошибке при вычислении стоп-лосса
-                self.logger.error("Ошибка при вычислении стоп-лосса")
-                # Продолжение цикла
-                continue
-
-            # Проверка на наличие достаточного баланса
-            if account_info['free']['USDT'] >= self.position_size:
-                # Размещение заявки на покупку
-                order_type = 'limit'
-                price = current_price - self.position_size
-                quantity = self.position_size
-                self.place_order(order_type, price, quantity)
-            else:
-                # Предупредительное сообщение об insufficient USDT balance
-                self.logger.warning("Недостаточно баланса USDT")
-
-            # Ожидание 10 секунд
-            time.sleep(10)
-
-            # Получение новых данных с рынка
-            market_data = self.get_market_data()
-            if market_data is None:
-                # Ошибочное сообщение об ошибкепри получении новых данных с рынка
-                self.logger.error("Ошибка при получении новых данных с рынка")
-                # Продолжение цикла
-                continue
-
-            # Вычисление стоп-лосса
-            stop_loss = self.calculate_stop_loss(market_data)
-            if stop_loss is None:
-                # Ошибочное сообщение об ошибке при вычислении стоп-лосса
-                self.logger.error("Ошибка при вычислении стоп-лосса")
-                # Продолжение цикла
-                continue
+            # Ожидание перед следующей итерацией
+            time.sleep(60)
+            # Выполнение сделки
+            self.trade()
