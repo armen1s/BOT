@@ -1,4 +1,4 @@
-# trading_config.py
+# config_trading.py
 
 SYMBOL = "BTC/USDT"
 LEVERAGE = 1
