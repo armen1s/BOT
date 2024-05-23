@@ -1,75 +1,85 @@
-# TradingBot.py
-
-import time
-import ccxt
-import pandas as pd
+import asyncio
 import logging
+import ccxt.async_support as ccxt
 from config_api import API_KEY, API_SECRET
-from config_trading import SYMBOL, LEVERAGE, POSITION_SIZE, FRAME, TAKE_PROFIT_COEF, DYNAMIC_SL_INTERVAL
-from strategy import Strategy
+from config_trading import SYMBOL, LEVERAGE, POSITION_SIZE, FRAME, TAKE_PROFIT_COEF, DYNAMIC_SL_INTERVAL, MAX_DRAW_DOWN
 
 class TradingBot:
     def init(self):
-        self.api_key = API_KEY
-        self.api_secret = API_SECRET
+        self.exchange = ccxt.bybit({
+            'apiKey': API_KEY,
+            'secret': API_SECRET,
+            'enableRateLimit': True
+        })
         self.symbol = SYMBOL
         self.leverage = LEVERAGE
         self.position_size = POSITION_SIZE
         self.frame = FRAME
-        self.dynamic_sl_interval = DYNAMIC_SL_INTERVAL
-        self.exchange = ccxt.bybit({'apiKey': self.api_key, 'secret': self.api_secret})
+        self.max_draw_down = MAX_DRAW_DOWN
+        self.current_balance = None
+        self.peak_balance = None
         self.logger = logging.getLogger(name)
-        self.strategy = Strategy(self.exchange, self.symbol, self.leverage, self.position_size, self.frame, TAKE_PROFIT_COEF)
-        self.current_order = None
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    def get_kline(self, frame):
+    async def fetch_data(self):
+        retries = 3
+        for i in range(retries):
+            try:
+                return await self.exchange.fetch_ohlcv(self.symbol, self.frame)
+            except Exception as e:
+                self.logger.error(f"Attempt {i+1}: Error fetching data - {e}")
+                if i < retries - 1:
+                    await asyncio.sleep(2 ** i)  # Exponential backoff
+                else:
+                    return None
+
+    async def execute_trade(self, decision):
+        if decision:
+            try:
+                order = await self.exchange.create_order(self.symbol, 'limit', decision['side'], decision['amount'], decision['price'])
+                self.logger.info(f"Order executed: {order}")
+                await self.update_balance()
+            except Exception as e:
+                self.logger.error(f"Failed to place order: {e}")
+        else:
+            self.logger.info("No trade executed due to lack of valid decision.")
+
+    async def update_balance(self):
+        balance = await self.fetch_balance()
+        if balance is not None:
+            self.update_peak_balance(balance)
+
+    async def fetch_balance(self):
         try:
-            ohlcv = self.exchange.fetch_ohlcv(self.symbol, frame)
-            return ohlcv
+            return await self.exchange.fetch_balance()
         except Exception as e:
-            self.logger.error('Ошибка при получении данных OHLCV: %s', str(e))
-            return []
+            self.logger.error(f"Error fetching balance: {e}")
+            return None
 
-    def trade(self):
-        try:
-            kline = self.get_kline(self.frame)
-            if not kline:
-                return
-            trade_type = self.strategy.get_trade_type(kline)
-            if trade_type is not None:
-                position_size = self.strategy.get_position_size()
-                stop_loss_price = self.strategy.get_stop_loss(kline, trade_type)
-                take_profit_price = self.strategy.get_take_profit(kline, trade_type)
-                order = self.exchange.create_order(self.symbol, 'limit', trade_type, position_size, {
-                    'stop_loss': stop_loss_price,
-                    'take_profit': take_profit_price
-                })
-                self.current_order = order
-                self.logger.info('Сделка выполнена: type=%s, size=%s, stop_loss=%s, take_profit=%s, order_id=%s',
-                                 trade_type, position_size, stop_loss_price, take_profit_price, order['id'])
-            else:
-                self.logger.info('Нет подходящей сделки.')
-        except Exception as e:
-            self.logger.error('Ошибка при выполнении сделки: %s', str(e))
+    def update_peak_balance(self, balance):
+        btc_balance = balance['total']['BTC']
+        self.current_balance = btc_balance
+        if self.peak_balance is None or btc_balance > self.peak_balance:
+            self.peak_balance = btc_balance
+        self.check_draw_down()
 
-    def update_stop_loss(self):
-        try:
-            if self.current_order:
-                kline = self.get_kline(self.frame)
-                if not kline:
-                    return
-                trade_type = 'buy' if self.current_order['side'] == 'buy' else 'sell'
-                new_stop_loss = self.strategy.get_stop_loss(kline, trade_type)
-                self.exchange.update_order(self.current_order['id'], {'stop_loss': new_stop_loss})
-                self.logger.info('Обновление стоп-лосса: order_id=%s, new_stop_loss=%s', self.current_order['id'], new_stop_loss)
-        except Exception as e:
-            self.logger.error('Ошибка при обновлении стоп-лосса: %s', str(e))
+    def check_draw_down(self):
+        if self.peak_balance and self.current_balance:
+            draw_down = ((self.peak_balance - self.current_balance) / self.peak_balance) * 100
+            if draw_down > self.max_draw_down:
+                self.logger.warning(f"Maximum draw down exceeded: {draw_down}%")
+                # Implement strategy to handle draw down, e.g., pause trading, notify user, etc.
 
-    def run(self):
-        last_sl_update = time.time()
+    async def run(self):
         while True:
-            self.trade()
-            if time.time() - last_sl_update >= self.dynamic_sl_interval:
-                self.update_stop_loss()
-                last_sl_update = time.time()
-            time.sleep(60)
+            data = await self.fetch_data()
+            if data:
+                decision = await self.strategy.evaluate(data)
+                await self.execute_trade(decision)
+            else:
+                self.logger.info("Data fetch was unsuccessful. Skipping this cycle.")
+            await asyncio.sleep(DYNAMIC_SL_INTERVAL)
+
+if name == "main":
+    bot = TradingBot()
+    asyncio.run(bot.run())
