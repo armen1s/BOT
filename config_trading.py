@@ -1,4 +1,4 @@
-# config_trading.py
+# trading_config.py
 
 SYMBOL = "BTC/USDT"
 LEVERAGE = 1
@@ -45,13 +45,11 @@ def setup_logging():
                 'backupCount': LOG_BACKUP_COUNT
             }
         },
-        'loggers': {
-            '': {
-                'level': LOG_LEVEL,
-                'handlers': ['console', 'file'],
-                'propagate': True
-            }
+        'root': {
+            'level': LOG_LEVEL,
+            'handlers': ['console', 'file']
         }
     })
 
 setup_logging()
+logger = logging.getLogger(name)
