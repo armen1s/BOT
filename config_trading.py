@@ -1,16 +1,14 @@
 # config_trading.py
 
-# Параметры торговли
 SYMBOL = "BTC/USDT"
 LEVERAGE = 1
 POSITION_SIZE = 0.01
 FRAME = "1h"  # Таймфрейм для анализа
 
-# Настройки тейк-профита и стоп-лосса
 TAKE_PROFIT_COEF = 0.5  # Коэффициент для тейк-профита
 DYNAMIC_SL_INTERVAL = 60  # Интервал обновления динамического стоп-лосса в секундах
+MAX_DRAW_DOWN = 20.0  # Максимальная просадка в процентах
 
-# Настройки логирования
 LOG_LEVEL = "INFO"
 LOG_FORMAT = "%(asctime)s [%(threadName)-12.12s] [%(levelname)-5.5s]  %(message)s"
 
