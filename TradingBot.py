@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from config_api import API_KEY, API_SECRET
-from trading_config import SYMBOL, LEVERAGE, POSITION_SIZE, FRAME, TAKE_PROFIT_COEF, DYNAMIC_SL_INTERVAL, logger
+from trading_config import logger
 from strategy import Strategy
 from bybit import Bybit  # Предположим, что Bybit - это класс, реализующий взаимодействие с API Bybit
 
@@ -33,6 +33,9 @@ class TradingBot:
         await self.start()
 
 def main():
+    # Здесь мы можем передать конфигурационные параметры из config_trading
+    from trading_config import SYMBOL, LEVERAGE, POSITION_SIZE, FRAME, TAKE_PROFIT_COEF, DYNAMIC_SL_INTERVAL
+
     bot = TradingBot(
         api_key=API_KEY,
         api_secret=API_SECRET,
