@@ -1,22 +1,25 @@
-from abc import abstractmethod
+# sl.py
+
 import pandas as pd
 
+class SL:
+    def init(self, is_dynamic: bool=False, coef: float=0.25):
+        self.is_dynamic = is_dynamic
+        self.coef = coef
 
-class SL(object):
-    def __init__(self, is_dinamic: bool=False, coef: float=0.25):
-        self.is_dinamic=is_dinamic
-        self.coef=coef
+    def get_dynamic_sl(self, df: pd.DataFrame, position_type: str) -> float:
+        price = df['close'].iloc[-1]
+        if position_type == 'buy':
+            return price - price * self.coef
+        elif position_type == 'sell':
+            return price + price * self.coef
 
-    @abstractmethod
-    def get_dinamic_sl(self, df: pd.DataFrame, position_type:int) -> float:
-        pass
-
-    def get_sl(self, df: pd.DataFrame, position_type:int) -> float:
-        price=df['close']
-        if not self.is_dinamic:
-            return price[-1]-price[-1]*self.coef
-        else: return self.get_dinamic_sl(df, position_type)
-
-
-
-
+    def get_sl(self, df: pd.DataFrame, position_type: str) -> float:
+        price = df['close'].iloc[-1]
+        if not self.is_dynamic:
+            if position_type == 'buy':
+                return price - price * self.coef
+            elif position_type == 'sell':
+                return price + price * self.coef
+        else:
+            return self.get_dynamic_sl(df, position_type)
