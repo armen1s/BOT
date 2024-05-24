@@ -45,11 +45,13 @@ def setup_logging():
                 'backupCount': LOG_BACKUP_COUNT
             }
         },
-        'root': {
-            'level': LOG_LEVEL,
-            'handlers': ['console', 'file']
+        'loggers': {
+            '': {
+                'level': LOG_LEVEL,
+                'handlers': ['console', 'file'],
+                'propagate': True
+            }
         }
     })
 
 setup_logging()
-logger = logging.getLogger(name)
